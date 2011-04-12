@@ -1,0 +1,16 @@
+
+#edit-type-wrapper, #edit-severity-wrapper,
+#dblog-viewer-filter-form .fieldset-wrapper > .form-item,
+#dblog-viewer-filter-form .date-clear-block {
+  display: inline-block;
+  float: left;
+  width: auto;
+  margin-right: 1em;
+  clear: none;
+}
+#dblog-viewer-filter-form .date-clear-block {
+  margin: 1em 0;
+}
+#dblog-viewer-filter-form #edit-submit {
+  clear: left;
+}

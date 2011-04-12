@@ -1,0 +1,4 @@
+name = Database Log Viewer
+description = Provides better list of recent log entries and bulk operations on them.
+dependencies[] = dblog
+core = 6.x

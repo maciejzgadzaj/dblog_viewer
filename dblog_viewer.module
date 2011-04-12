@@ -1,0 +1,242 @@
+<?php
+
+/**
+ * Implementation of hook_menu()
+ */
+function dblog_viewer_menu() {
+  $items = array();
+  $items['admin/settings/logging/dblog_viewer'] = array(
+    'title' => t('Enhanced database log viewer'),
+    'description' => 'Settings for enhanced Drupal database log viewer.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dblog_viewer_admin_settings'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'dblog_viewer.pages.inc',
+  );
+  $items['admin/reports/dblog_viewer'] = array(
+    'title' => t('Enhanced recent log entries'),
+    'description' => t('View, filter and manage events that have recently been logged.'),
+    'page callback' => 'dblog_viewer_page_recent_log_entries',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'dblog_viewer.pages.inc',
+  );
+  return $items;
+}
+
+/**
+ * Return form for dblog administration filters.
+ *
+ * @ingroup forms
+ * @see dblog_filter_form_submit()
+ * @see dblog_filter_form_validate()
+ */
+function dblog_viewer_filter_form() {
+  $session = &$_SESSION['dblog_viewer_overview_filter'];
+  $session = is_array($session) ? $session : array();
+  $filters = dblog_viewer_filters();
+
+  // Fieldset
+  $form['filters'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Filter log messages'),
+    '#theme' => 'dblog_viewer_filters',
+    '#collapsible' => TRUE,
+    '#collapsed' => empty($session),
+  );
+
+  // Form elements
+  foreach ($filters as $key => $filter) {
+    $form['filters']['status'][$key] = $filter['field'];
+    // Add default values if previously posted values are in session
+    if (!empty($session[$key])) {
+      $form['filters']['status'][$key]['#default_value'] = $session[$key];
+    }
+  }
+
+  // Submit button
+  $form['filters']['buttons']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Filter'),
+  );
+
+  // Add reset button if previously posted values are in session
+  if (!empty($session)) {
+    $form['filters']['buttons']['reset'] = array(
+      '#type' => 'submit',
+      '#value' => t('Reset')
+    );
+  }
+
+  return $form;
+}
+
+/**
+ * Process result from dblog_viewer administration filter form.
+ */
+function dblog_viewer_filter_form_submit($form, &$form_state) {
+  $op = $form_state['values']['op'];
+  $filters = dblog_viewer_filters();
+  switch ($op) {
+    case t('Filter'):
+      foreach ($filters as $name => $filter) {
+        if (isset($form_state['values'][$name])) {
+          $_SESSION['dblog_viewer_overview_filter'][$name] = $form_state['values'][$name];
+        }
+      }
+      break;
+    case t('Reset'):
+      $_SESSION['dblog_viewer_overview_filter'] = array();
+      break;
+  }
+  return 'admin/reports/dblog_viewer';
+}
+
+/**
+ * List dblog_viewer administration filters that can be applied.
+ */
+function dblog_viewer_filters() {
+  $filters = array();
+
+  foreach (_dblog_get_message_types() as $type) {
+    $types[$type] = $type;
+  }
+
+  if (!empty($types)) {
+    $filters['type'] = array(
+      'field' => array(
+        '#type'     => 'select',
+        '#title'    => t('Type'),
+        '#options'  => $types,
+        '#multiple' => TRUE,
+        '#size'     => 8,
+      ),
+      'where' => "w.type = '%s'",
+    );
+  }
+
+  $filters['severity'] = array(
+    'field' => array(
+      '#type'     => 'select',
+      '#title'    => t('Severity'),
+      '#options'  => watchdog_severity_levels(),
+      '#multiple' => TRUE,
+      '#size'     => 8,
+    ),
+    'where' => 'w.severity = %d',
+  );
+
+  $filters['message'] = array(
+    'field' => array(
+      '#type'   => 'textfield',
+      '#title'  => t('Message contains'),
+      '#size'   => 40,
+    ),
+    'where' => "w.message LIKE '%%%s%%'",
+  );
+
+  $filters['variables'] = array(
+    'field' => array(
+      '#type'  => 'textfield',
+      '#title' => 'Variables contain',
+      '#size'   => 40,
+    ),
+    'where' => "w.variables LIKE '%%%s%%'",
+  );
+
+  $filters['wid'] = array(
+    'field' => array(
+      '#type'   => 'textfield',
+      '#title'  => 'wid',
+      '#size'   => 15,
+    ),
+    'where' => 'w.wid = %d',
+  );
+
+  $filters['date_from'] = array(
+    'field' => array(
+      '#type'         => 'textfield',
+      '#title'        => 'Start date',
+      '#size'         => 15,
+      '#description'  => 'Format: ' . date('Y-m-d'),
+    ),
+    'where' => 'w.timestamp >= %d',
+    'value_modifier' => 'strtotime',
+  );
+  if (module_exists('date_popup') && module_exists('jquery_ui')) {
+    $filters['date_from']['field']['#type'] = 'date_popup';
+    $filters['date_from']['field']['#date_format'] = 'Y-m-d';
+    unset($filters['date_from']['field']['#description']);
+  }
+
+  $filters['date_to'] = array(
+    'field' => array(
+      '#type'   => 'textfield',
+      '#title'  => 'End date',
+      '#size'   => 15,
+      '#description'  => 'Format: ' . date('Y-m-d'),
+    ),
+    'where' => "w.timestamp < %d + 60*60*24",
+    'value_modifier' => 'strtotime',
+  );
+  if (module_exists('date_popup') && module_exists('jquery_ui')) {
+    $filters['date_to']['field']['#type'] = 'date_popup';
+    $filters['date_to']['field']['#date_format'] = 'Y-m-d';
+    unset($filters['date_to']['field']['#description']);
+  }
+
+  return $filters;
+}
+
+/**
+ * Build query for dblog administration filters based on session.
+ */
+function dblog_viewer_build_filter_query() {
+  if (empty($_SESSION['dblog_viewer_overview_filter'])) {
+    return;
+  }
+
+  $filters = dblog_viewer_filters();
+
+  // Build query
+  $where = $args = array();
+  foreach ($_SESSION['dblog_viewer_overview_filter'] as $key => $filter) {
+    $filter_where = array();
+    if (is_array($filter)) {
+      foreach ($filter as $value) {
+        if ($value) {
+          $filter_where[] = $filters[$key]['where'];
+          $args[] = ($filters[$key]['value_modifier']) ? call_user_func($filters[$key]['value_modifier'], $value) : $value;
+        }
+      }
+    } elseif ($filter) {
+      $filter_where[] = $filters[$key]['where'];
+      $args[] = ($filters[$key]['value_modifier']) ? call_user_func($filters[$key]['value_modifier'], $filter) : $filter;
+    }
+    if (!empty($filter_where)) {
+      $where[] = '('. implode(' OR ', $filter_where) .')';
+    }
+  }
+  $where = !empty($where) ? implode(' AND ', $where) : '';
+
+  return array(
+    'where' => $where,
+    'args' => $args,
+  );
+}
+
+/**
+ * Formats a log message for display.
+ *
+ * @param $dblog
+ *   An object with at least the message and variables properties
+ */
+function _dblog_viewer_format_message($dblog) {
+  // Legacy messages and user specified text
+  if ($dblog->variables === 'N;') {
+    return $dblog->message;
+  }
+  // Message to translate with injected variables
+  else {
+    return t($dblog->message, unserialize($dblog->variables));
+  }
+}

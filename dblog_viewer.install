@@ -1,0 +1,13 @@
+<?php
+
+/**
+ * @file
+ * Install hooks for dblog_viewer.module.
+ */
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function dblog_viewer_uninstall() {
+  db_query("DELETE FROM {variable} WHERE name LIKE 'dblog_viewer_%%'");
+}
