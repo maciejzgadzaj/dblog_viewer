@@ -1,4 +1,10 @@
 
+#dblog-viewer-filter-form .fieldset-wrapper fieldset {
+  float: left;
+  display: inline-block;
+  margin: 0 1em 0 0;
+}
+
 #edit-type-wrapper, #edit-severity-wrapper,
 #dblog-viewer-filter-form .fieldset-wrapper > .form-item,
 #dblog-viewer-filter-form .date-clear-block {
@@ -8,9 +14,39 @@
   margin-right: 1em;
   clear: none;
 }
-#dblog-viewer-filter-form .date-clear-block {
-  margin: 1em 0;
+#dblog-viewer-filter-form .form-submit {
+  margin-right: .5em;
 }
-#dblog-viewer-filter-form #edit-submit {
-  clear: left;
+
+#dblog-viewer-filter-form #edit-wid-wrapper {
+  margin-top: 0;
+}
+#dblog-viewer-filter-form .date-clear-block {
+  margin: 0;
+}
+#edit-delete {
+  float: right;
+}
+#dblog-viewer tr td {
+  padding: 5px;
+}
+
+#dblog-viewer tr.dblog-viewer-error,
+#dblog-viewer tr.dblog-viewer-critial,
+#dblog-viewer tr.dblog-viewer-alert,
+#dblog-viewer tr.dblog-viewer-emerg {
+  background-color: #FCC;
+}
+#dblog-viewer tr.dblog-viewer-warning {
+  background-color: #FEFFBF;
+}
+
+.dblog-viewer-event {
+  margin-bottom: 3em;
+}
+.dblog-viewer-event th {
+  width: 25%;
+}
+#dblog-viewer td.active {
+  background-color: transparent;
 }

@@ -1,1 +1,3 @@
-Drupal 6 enhanced database log viewer, with additional filtering options and (in future) bulk operations on log entries.
+Drupal 6 enhanced database log viewer (based on core dblog module), with additional filtering options and (in future) bulk operations on log entries.
+
+Pre-alpha version, still in initial development.

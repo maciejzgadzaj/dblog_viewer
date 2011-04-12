@@ -1,6 +1,21 @@
 <?php
 
 /**
+ * Implementation of hook_help().
+ */
+function dblog_viewer_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#dblog':
+      $output = '<p>'. t('The dblog module monitors your system, capturing system events in a log to be reviewed by an authorized individual at a later time. This is useful for site administrators who want a quick overview of activities on their site. The logs also record the sequence of events, so it can be useful for debugging site errors.') .'</p>';
+      $output .= '<p>'. t('The dblog log is simply a list of recorded events containing usage data, performance data, errors, warnings and operational information. Administrators should check the dblog report on a regular basis to ensure their site is working properly.') .'</p>';
+      $output .= '<p>'. t('For more information, see the online handbook entry for <a href="@dblog">Dblog module</a>.', array('@dblog' => 'http://drupal.org/handbook/modules/dblog/')) .'</p>';
+      return $output;
+    case 'admin/reports/dblog_viewer':
+      return '<p>'. t('The dblog_viewer module is slightly enhanced version of core dblog module, displaying system event log captured by dblog. The log is simply a list of recorded events containing usage data, performance data, errors, warnings and operational information. It is vital to check the dblog report on a regular basis as it is often the only way to tell what is going on.') .'</p>';
+  }
+}
+
+/**
  * Implementation of hook_menu()
  */
 function dblog_viewer_menu() {
@@ -16,26 +31,30 @@ function dblog_viewer_menu() {
   $items['admin/reports/dblog_viewer'] = array(
     'title' => t('Enhanced recent log entries'),
     'description' => t('View, filter and manage events that have recently been logged.'),
-    'page callback' => 'dblog_viewer_page_recent_log_entries',
-    'access arguments' => array('administer site configuration'),
+    'page callback' => 'dblog_viewer_page_overview',
+    'access arguments' => array('access site reports'),
+    'file' => 'dblog_viewer.pages.inc',
+  );
+  $items['admin/reports/dblog_viewer_event/%'] = array(
+    'title' => t('Log entry details'),
+    'page callback' => 'dblog_viewer_page_event',
+    'page arguments' => array(3),
+    'access arguments' => array('access site reports'),
+    'type' => MENU_CALLBACK,
     'file' => 'dblog_viewer.pages.inc',
   );
   return $items;
 }
 
 /**
- * Return form for dblog administration filters.
- *
- * @ingroup forms
- * @see dblog_filter_form_submit()
- * @see dblog_filter_form_validate()
+ * Returns form for log filters.
  */
 function dblog_viewer_filter_form() {
   $session = &$_SESSION['dblog_viewer_overview_filter'];
   $session = is_array($session) ? $session : array();
   $filters = dblog_viewer_filters();
 
-  // Fieldset
+  // Fieldsets
   $form['filters'] = array(
     '#type' => 'fieldset',
     '#title' => t('Filter log messages'),
@@ -43,13 +62,25 @@ function dblog_viewer_filter_form() {
     '#collapsible' => TRUE,
     '#collapsed' => empty($session),
   );
+  $form['filters']['types'] = array(
+    '#type' => 'fieldset',
+    '#collapsible' => FALSE,
+  );
+  $form['filters']['content'] = array(
+    '#type' => 'fieldset',
+    '#collapsible' => FALSE,
+  );
+  $form['filters']['dates'] = array(
+    '#type' => 'fieldset',
+    '#collapsible' => FALSE,
+  );
 
   // Form elements
   foreach ($filters as $key => $filter) {
-    $form['filters']['status'][$key] = $filter['field'];
+    $form['filters'][$filter['fieldset']][$key] = $filter['field'];
     // Add default values if previously posted values are in session
     if (!empty($session[$key])) {
-      $form['filters']['status'][$key]['#default_value'] = $session[$key];
+      $form['filters'][$filter['fieldset']][$key]['#default_value'] = $session[$key];
     }
   }
 
@@ -57,6 +88,7 @@ function dblog_viewer_filter_form() {
   $form['filters']['buttons']['submit'] = array(
     '#type' => 'submit',
     '#value' => t('Filter'),
+    '#prefix' => '<div style="clear:both"></div>',
   );
 
   // Add reset button if previously posted values are in session
@@ -65,13 +97,17 @@ function dblog_viewer_filter_form() {
       '#type' => 'submit',
       '#value' => t('Reset')
     );
+    $form['filters']['buttons']['delete'] = array(
+      '#type' => 'submit',
+      '#value' => t('Delete all selected entries')
+    );
   }
 
   return $form;
 }
 
 /**
- * Process result from dblog_viewer administration filter form.
+ * Processes result from submitted log filters form.
  */
 function dblog_viewer_filter_form_submit($form, &$form_state) {
   $op = $form_state['values']['op'];
@@ -87,12 +123,15 @@ function dblog_viewer_filter_form_submit($form, &$form_state) {
     case t('Reset'):
       $_SESSION['dblog_viewer_overview_filter'] = array();
       break;
+    case t('Delete all selected entries'):
+      _dblog_viewer_delete_selected_entries();
+      break;
   }
   return 'admin/reports/dblog_viewer';
 }
 
 /**
- * List dblog_viewer administration filters that can be applied.
+ * Lists log filters that can be applied.
  */
 function dblog_viewer_filters() {
   $filters = array();
@@ -103,63 +142,69 @@ function dblog_viewer_filters() {
 
   if (!empty($types)) {
     $filters['type'] = array(
+      'fieldset'  => 'types',
       'field' => array(
         '#type'     => 'select',
         '#title'    => t('Type'),
         '#options'  => $types,
         '#multiple' => TRUE,
-        '#size'     => 8,
+        '#size'     => 9,
       ),
-      'where' => "w.type = '%s'",
+      'where' => "type = '%s'",
     );
   }
 
   $filters['severity'] = array(
+    'fieldset'  => 'types',
     'field' => array(
       '#type'     => 'select',
       '#title'    => t('Severity'),
       '#options'  => watchdog_severity_levels(),
       '#multiple' => TRUE,
-      '#size'     => 8,
+      '#size'     => 9,
     ),
-    'where' => 'w.severity = %d',
-  );
-
-  $filters['message'] = array(
-    'field' => array(
-      '#type'   => 'textfield',
-      '#title'  => t('Message contains'),
-      '#size'   => 40,
-    ),
-    'where' => "w.message LIKE '%%%s%%'",
-  );
-
-  $filters['variables'] = array(
-    'field' => array(
-      '#type'  => 'textfield',
-      '#title' => 'Variables contain',
-      '#size'   => 40,
-    ),
-    'where' => "w.variables LIKE '%%%s%%'",
+    'where' => 'severity = %d',
   );
 
   $filters['wid'] = array(
+    'fieldset'  => 'content',
     'field' => array(
       '#type'   => 'textfield',
       '#title'  => 'wid',
       '#size'   => 15,
     ),
-    'where' => 'w.wid = %d',
+    'where' => 'wid = %d',
+  );
+
+  $filters['message'] = array(
+    'fieldset'  => 'content',
+    'field' => array(
+      '#type'   => 'textfield',
+      '#title'  => t('Message contains'),
+      '#size'   => 40,
+    ),
+    'where' => "message LIKE '%%%s%%'",
+  );
+
+  $filters['variables'] = array(
+    'fieldset'  => 'content',
+    'field' => array(
+      '#type'  => 'textfield',
+      '#title' => 'Variables contain',
+      '#size'   => 40,
+    ),
+    'where' => "variables LIKE '%%%s%%'",
   );
 
   $filters['date_from'] = array(
+    'fieldset'  => 'dates',
     'field' => array(
       '#type'         => 'textfield',
       '#title'        => 'Start date',
       '#size'         => 15,
       '#description'  => 'Format: ' . date('Y-m-d'),
     ),
-    'where' => 'w.timestamp >= %d',
+    'where' => 'timestamp >= %d',
     'value_modifier' => 'strtotime',
   );
   if (module_exists('date_popup') && module_exists('jquery_ui')) {
@@ -169,13 +214,14 @@ function dblog_viewer_filters() {
   }
 
   $filters['date_to'] = array(
+    'fieldset'  => 'dates',
     'field' => array(
       '#type'   => 'textfield',
       '#title'  => 'End date',
       '#size'   => 15,
       '#description'  => 'Format: ' . date('Y-m-d'),
     ),
-    'where' => "w.timestamp < %d + 60*60*24",
+    'where' => "timestamp < %d + 60*60*24",
     'value_modifier' => 'strtotime',
   );
   if (module_exists('date_popup') && module_exists('jquery_ui')) {
@@ -188,7 +234,7 @@ function dblog_viewer_filters() {
 }
 
 /**
- * Build query for dblog administration filters based on session.
+ * Builds query for log filters based on session.
  */
 function dblog_viewer_build_filter_query() {
   if (empty($_SESSION['dblog_viewer_overview_filter'])) {
@@ -201,6 +247,7 @@ function dblog_viewer_build_filter_query() {
   $where = $args = array();
   foreach ($_SESSION['dblog_viewer_overview_filter'] as $key => $filter) {
     $filter_where = array();
+    // Selects
     if (is_array($filter)) {
       foreach ($filter as $value) {
         if ($value) {
@@ -208,6 +255,7 @@ function dblog_viewer_build_filter_query() {
           $args[] = ($filters[$key]['value_modifier']) ? call_user_func($filters[$key]['value_modifier'], $value) : $value;
         }
       }
+    // Inputs
     } elseif ($filter) {
       $filter_where[] = $filters[$key]['where'];
       $args[] = ($filters[$key]['value_modifier']) ? call_user_func($filters[$key]['value_modifier'], $filter) : $filter;
@@ -225,10 +273,7 @@ function dblog_viewer_build_filter_query() {
 }
 
 /**
- * Formats a log message for display.
- *
- * @param $dblog
- *   An object with at least the message and variables properties
+ * Formats log message for display.
  */
 function _dblog_viewer_format_message($dblog) {
   // Legacy messages and user specified text
@@ -239,4 +284,38 @@ function _dblog_viewer_format_message($dblog) {
   else {
     return t($dblog->message, unserialize($dblog->variables));
   }
+}
+
+/**
+ * Provides array of images for all log severity levels.
+ */
+function _dblog_viewer_severity_icons($severity = null) {
+  $icons = array(
+    WATCHDOG_DEBUG    => theme('image', 'misc/watchdog-ok.png', t('debug'), t('debug')),
+    WATCHDOG_INFO     => theme('image', drupal_get_path('module', 'dblog_viewer') . '/icons/info.png', t('info'), t('info')),
+    WATCHDOG_NOTICE   => theme('image', drupal_get_path('module', 'dblog_viewer') . '/icons/info.png', t('notice'), t('notice')),
+    WATCHDOG_WARNING  => theme('image', 'misc/watchdog-warning.png', t('warning'), t('warning')),
+    WATCHDOG_ERROR    => theme('image', 'misc/watchdog-error.png', t('error'), t('error')),
+    WATCHDOG_CRITICAL => theme('image', 'misc/watchdog-error.png', t('critical'), t('critical')),
+    WATCHDOG_ALERT    => theme('image', 'misc/watchdog-error.png', t('alert'), t('alert')),
+    WATCHDOG_EMERG    => theme('image', 'misc/watchdog-error.png', t('emergency'), t('emergency')),
+  );
+  return ($severity) ? $icons[$severity] : $icons;
+}
+
+/**
+ * Provides array of classes for all log severity levels.
+ */
+function _dblog_viewer_severity_classes($severity = null) {
+  $classes = array(
+    WATCHDOG_DEBUG    => 'dblog-viewer-debug',
+    WATCHDOG_INFO     => 'dblog-viewer-info',
+    WATCHDOG_NOTICE   => 'dblog-viewer-notice',
+    WATCHDOG_WARNING  => 'dblog-viewer-warning',
+    WATCHDOG_ERROR    => 'dblog-viewer-error',
+    WATCHDOG_CRITICAL => 'dblog-viewer-critical',
+    WATCHDOG_ALERT    => 'dblog-viewer-alert',
+    WATCHDOG_EMERG    => 'dblog-viewer-emerg',
+  );
+  return ($severity) ? $classes[$severity] : $classes;
 }
